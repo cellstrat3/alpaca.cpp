@@ -25,6 +25,10 @@ bool gpt_params_parse(int argc, char ** argv, gpt_params & params) {
             params.n_threads = std::stoi(argv[++i]);
         } else if (arg == "-p" || arg == "--prompt") {
             params.prompt = argv[++i];
+        } else if (arg == "--instruct") {
+            params.instruct = argv[++i];
+        } else if (arg == "--response") {
+            params.response = argv[++i];
         } else if (arg == "-f" || arg == "--file") {
 
             std::ifstream file(argv[++i]);
