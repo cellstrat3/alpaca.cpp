@@ -32,8 +32,8 @@
 static const std::map<int, int> LLAMA_N_PARTS = {
     { 4096, 1 },
     { 5120, 1 },
-    { 6656, 4 },
-    { 8192, 8 },
+    { 6656, 1 },
+    { 8192, 1 },
 };
 
 // default hparams (LLaMA 7B)
@@ -318,7 +318,7 @@ bool llama_model_load(const std::string & fname, llama_model & model, gpt_vocab 
     fin.close();
 
     std::vector<uint8_t> tmp;
-
+    
     for (int i = 0; i < n_parts; ++i) {
         const int part_id = i;
         //const int part_id = n_parts - i - 1;
@@ -796,14 +796,6 @@ int main(int argc, char ** argv) {
     const int64_t t_main_start_us = ggml_time_us();
     int exit_count = false;
     gpt_params params;
-
-    params.temp = 0.1f;
-    params.top_p = 0.95f;
-    params.n_ctx = 2048;
-    params.interactive = true;
-    params.interactive_start = true;
-    params.use_color = true;
-    params.model = "ggml-alpaca-7b-q4.bin";
     params.instruct = "Transcript of a dialog, where the User interacts with an Assistant named Bob. Bob is helpful, kind, honest, good at writing, and never fails to answer the User's requests immediately and with precision.\n\nUser: Hello, Bob.\nBob: Hello. How may I help you today?\nUser: Please tell me the largest city in Europe.\nBob: Sure. The largest city in Europe is Moscow, the capital of Russia.\n";
     params.prompt = "User:\n";
     params.response = "Bob:\n";
@@ -863,12 +855,30 @@ int main(int argc, char ** argv) {
     // Add a space in front of the first character to match OG llama tokenizer behavior
     // params.prompt.insert(0, 1, ' ');
     // tokenize the prompt
-    std::vector<gpt_vocab::id> embd_inp;// = ::llama_tokenize(vocab, params.prompt, true);
+    std::vector<gpt_vocab::id> embd_inp;
 
     // params.n_predict = std::min(params.n_predict, model.hparams.n_ctx - (int) embd_inp.size());
 
     // // tokenize the reverse prompt
     std::vector<gpt_vocab::id> antiprompt_inp = ::llama_tokenize(vocab, params.antiprompt, false);
+
+    std::vector<gpt_vocab::id> instruct_inp = ::llama_tokenize(vocab, params.instruct, true);
+    std::vector<gpt_vocab::id> prompt_inp = ::llama_tokenize(vocab, params.prompt, true);
+    std::vector<gpt_vocab::id> response_inp = ::llama_tokenize(vocab,params.response, false);
+
+    embd_inp.insert(embd_inp.end(), instruct_inp.begin(), instruct_inp.end());
+
+    // std::vector<gpt_vocab::id> instruct_inp = ::llama_tokenize(vocab, " Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n", true);
+    // std::vector<gpt_vocab::id> prompt_inp = ::llama_tokenize(vocab, "### Instruction:\n\n", true);
+    // std::vector<gpt_vocab::id> response_inp = ::llama_tokenize(vocab, "### Response:\n\n", false);
+    // embd_inp.insert(embd_inp.end(), instruct_inp.begin(), instruct_inp.end());
+
+    // if(!params.prompt.empty()) {
+    //     std::vector<gpt_vocab::id> param_inp = ::llama_tokenize(vocab, params.prompt, true);
+    //     embd_inp.insert(embd_inp.end(), prompt_inp.begin(), prompt_inp.end());
+    //     embd_inp.insert(embd_inp.end(), param_inp.begin(), param_inp.end());
+    //     embd_inp.insert(embd_inp.end(), response_inp.begin(), response_inp.end());
+    // }
 
     // fprintf(stderr, "\n");
     // fprintf(stderr, "%s: prompt: '%s'\n", __func__, params.prompt.c_str());
@@ -877,19 +887,6 @@ int main(int argc, char ** argv) {
     //     fprintf(stderr, "%6d -> '%s'\n", embd_inp[i], vocab.id_to_token.at(embd_inp[i]).c_str());
     // }
     // fprintf(stderr, "\n");
-
-    // std::vector<gpt_vocab::id> instruct_inp = ::llama_tokenize(vocab, " Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n", true);
-    // std::vector<gpt_vocab::id> instruct_inp = ::llama_tokenize(vocab, " Below is a transcript of a dialog, where the User interacts with an Assistant named Bob. Bob is helpful, kind, honest, good at writing, and never fails to answer the User's requests immediately and with precision. Write a response as Bob would write in response to the User\'s text. Bob keeps response very concise and to the point. \n\n", true);
-    
-    std::vector<gpt_vocab::id> instruct_inp = ::llama_tokenize(vocab,  params.instruct, true);
-    // Bob ends every response with the following text :[end of text] \n\n", true);
-    
-    // std::vector<gpt_vocab::id> prompt_inp = ::llama_tokenize(vocab, "### Instruction:\n\n", true);
-    std::vector<gpt_vocab::id> prompt_inp = ::llama_tokenize(vocab, params.prompt, true);
-    // std::vector<gpt_vocab::id> response_inp = ::llama_tokenize(vocab, "### Response:\n\n", false);
-    std::vector<gpt_vocab::id> response_inp = ::llama_tokenize(vocab, params.response, false);
-
-    embd_inp.insert(embd_inp.end(), instruct_inp.begin(), instruct_inp.end());
 
 
     if (params.interactive) {
@@ -905,8 +902,10 @@ int main(int argc, char ** argv) {
         // Windows console ANSI color fix
         DWORD mode = 0;
         HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-        if (hConsole && hConsole != INVALID_HANDLE_VALUE && GetConsoleMode(hConsole, &mode))
+        if (hConsole && hConsole != INVALID_HANDLE_VALUE && GetConsoleMode(hConsole, &mode)){
             SetConsoleMode(hConsole, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+            SetConsoleOutputCP(CP_UTF8);
+        }
 #endif
 
         fprintf(stderr, "%s: interactive mode on.\n", __func__);
@@ -1110,10 +1109,14 @@ int main(int argc, char ** argv) {
         // end of text token
         
         if (embd.back() == 2) {
-            fprintf(stderr, " [end of text]\n");
-            is_interacting = true;
-            // continue;
-            exit(0);
+            if (params.interactive) {
+                is_interacting = true;
+                continue;
+            } else {
+                printf("\n");
+                fprintf(stderr, " [end of text]\n");
+                break;
+            }
         }
         // printf("\nremaining_tokens: %d", remaining_tokens);
     }
